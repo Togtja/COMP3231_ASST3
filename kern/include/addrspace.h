@@ -34,12 +34,21 @@
  * Address space structure and operations.
  */
 
-
 #include <vm.h>
 #include "opt-dumbvm.h"
 
-struct vnode;
+#define STACKPAGES    16
 
+struct vnode;
+struct as_seg;
+typedef struct as_page as_page;
+struct as_page {
+	vaddr_t vaddress; //The Virtual adress for the node
+	size_t size; // Size of the node
+	mode_t mode; //Mode (Read/Write/Execute) for the file/address
+	mode_t pre_load_mode; //The mode before loading the address
+	as_page * next; //The next addresspage/region
+};
 
 /*
  * Address space - data structure associated with the virtual memory
@@ -47,7 +56,6 @@ struct vnode;
  *
  * You write this.
  */
-
 struct addrspace {
 #if OPT_DUMBVM
         vaddr_t as_vbase1;
@@ -59,6 +67,7 @@ struct addrspace {
         paddr_t as_stackpbase;
 #else
         /* Put stuff here for your VM system */
+	struct as_page* start; //Linked list for the address_node
 #endif
 };
 

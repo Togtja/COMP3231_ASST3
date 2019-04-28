@@ -35,8 +35,24 @@
  *
  * You'll probably want to add stuff here.
  */
+/*
+struct pagetable {
+	//Entry Low and high?
+	struct pagetable** page_table
+};*/
 
+/*
+typedef struct pagetable** level2PageTable
+level2PageTable lvl2PT
+int size_lvl2PT;
+struct lock* lvl2PT_lock;
 
+} page_table;
+struct frame_table {
+	int size;
+	int start;
+	paddr_t offet;
+};*/
 #include <machine/vm.h>
 
 /* Fault-type arguments to vm_fault() */

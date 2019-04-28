@@ -37,6 +37,7 @@
 #include <addrspace.h>
 #include <vm.h>
 #include <proc.h>
+#include <elf.h>
 
 /*
  * Note! If OPT_DUMBVM is set, as is the case until you start the VM
@@ -48,26 +49,23 @@
  *
  */
 
-struct addrspace *
-as_create(void)
-{
+//struct paddr_t** pagetable; //pagetable
+
+struct addrspace * as_create(void) {
 	struct addrspace *as;
 
 	as = kmalloc(sizeof(struct addrspace));
 	if (as == NULL) {
 		return NULL;
 	}
-
 	/*
 	 * Initialize as needed.
 	 */
-
+	as->start = NULL;
 	return as;
 }
 
-int
-as_copy(struct addrspace *old, struct addrspace **ret)
-{
+int as_copy(struct addrspace *old, struct addrspace **ret) {
 	struct addrspace *newas;
 
 	newas = as_create();
@@ -78,26 +76,48 @@ as_copy(struct addrspace *old, struct addrspace **ret)
 	/*
 	 * Write this.
 	 */
-
-	(void)old;
-
+	if (old->start == NULL) {
+		//You are trying to copy a newly created address space
+		//So just return the newly created new one as they are the same
+		return 0;
+	}
+	struct as_page * curr = old->start;
+	struct as_page * newcurr = newas->start;
+	while (curr != NULL) {
+		newcurr = kmalloc(sizeof(struct as_page));
+		if (newcurr == NULL) {
+			return ENOMEM;
+		}
+		newcurr->vaddress = curr->vaddress;
+		newcurr->size = curr->size;
+		newcurr->mode = curr->mode;
+		newcurr->pre_load_mode = curr->pre_load_mode;
+		newcurr->next = NULL;
+		curr = curr->next;
+		newcurr = newcurr->next;
+	}
 	*ret = newas;
 	return 0;
 }
 
-void
-as_destroy(struct addrspace *as)
-{
+void as_destroy(struct addrspace *as) {
 	/*
 	 * Clean up as needed.
 	 */
+	if (as->start == NULL || as == NULL) {
+		return;
+	}
+	struct as_page* next_p = as->start->next;
+	while (next_p != NULL) {
+		kfree(as->start);
+		as->start = next_p;
+		next_p = next_p->next;
+	}
+	kfree(as->start);
 
-	kfree(as);
 }
 
-void
-as_activate(void)
-{
+void as_activate(void) {
 	struct addrspace *as;
 
 	as = proc_getas();
@@ -109,14 +129,17 @@ as_activate(void)
 		return;
 	}
 
-	/*
-	 * Write this.
-	 */
+	//dumbvm is best vm
+	int spl = splhigh();
+	int i;
+	for (i = 0; i < NUM_TLB; i++) {
+		tlb_write(TLBHI_INVALID(i), TLBLO_INVALID(), i);
+	}
+
+	splx(spl);
 }
 
-void
-as_deactivate(void)
-{
+void as_deactivate(void) {
 	/*
 	 * Write this. For many designs it won't need to actually do
 	 * anything. See proc.c for an explanation of why it (might)
@@ -134,53 +157,83 @@ as_deactivate(void)
  * moment, these are ignored. When you write the VM system, you may
  * want to implement them.
  */
-int
-as_define_region(struct addrspace *as, vaddr_t vaddr, size_t memsize,
-		 int readable, int writeable, int executable)
-{
+int as_define_region(struct addrspace *as, vaddr_t vaddr, size_t memsize,
+		 int readable, int writeable, int executable) {
 	/*
 	 * Write this.
 	 */
+	if (as == NULL) {
+		return EINVAL;
+	}
+	//Thank you so much Kevin, for the dumbvm, it helped us so much to get started
+	memsize += vaddr & ~(vaddr_t)PAGE_FRAME;
+	vaddr &= PAGE_FRAME;
 
-	(void)as;
-	(void)vaddr;
-	(void)memsize;
-	(void)readable;
-	(void)writeable;
-	(void)executable;
-	return ENOSYS; /* Unimplemented */
+	/* ...and now the length. */
+	memsize = (memsize + PAGE_SIZE - 1) & PAGE_FRAME;
+	mode_t per_mode = 0;
+	if (readable) {
+		per_mode |= PF_R;
+	}
+	if (writeable) {
+		per_mode |= PF_W;
+	}
+	if (executable) {
+		per_mode |= PF_X;
+	}
+	struct as_page * curr = as->start;
+	while (curr != NULL) {
+		curr = curr->next;
+	}
+	curr = kmalloc(sizeof(struct as_page));
+	if (curr == NULL) {
+		return ENOMEM;
+	}
+	curr->vaddress = vaddr;
+	curr->size = memsize;
+	curr->mode = per_mode;
+	curr->next = NULL;
+	return 0; /* Unimplemented */
 }
 
-int
-as_prepare_load(struct addrspace *as)
-{
+int as_prepare_load(struct addrspace *as) {
 	/*
 	 * Write this.
 	 */
-
-	(void)as;
+	struct as_page* curr = as->start;
+	while (curr != NULL) {
+		curr->pre_load_mode = curr->mode;
+		curr->mode = PF_W;
+		curr = curr->next;
+	}
 	return 0;
 }
 
-int
-as_complete_load(struct addrspace *as)
-{
-	/*
-	 * Write this.
-	 */
-
-	(void)as;
+int as_complete_load(struct addrspace *as) {
+	struct as_page* curr = as->start;
+	while (curr != NULL) {
+		curr->mode = curr->pre_load_mode;
+		curr = curr->next;
+	}
 	return 0;
 }
 
-int
-as_define_stack(struct addrspace *as, vaddr_t *stackptr)
-{
+int as_define_stack(struct addrspace *as, vaddr_t *stackptr) {
 	/*
 	 * Write this.
 	 */
-
-	(void)as;
+	struct as_page* newPage = as->start;
+	while (newPage != NULL) {
+		newPage = newPage->next;
+	}
+	newPage = kmalloc(sizeof(struct as_page));
+	if (newPage == NULL) {
+		return ENOMEM;
+	}
+	newPage->vaddress = USERSTACK * (STACKPAGES - PAGE_SIZE);
+	newPage->size = STACKPAGES;
+	newPage->mode = (PF_R | PF_W | PF_X);
+	newPage->next = NULL;
 
 	/* Initial user-level stack pointer */
 	*stackptr = USERSTACK;
