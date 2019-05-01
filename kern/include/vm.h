@@ -36,23 +36,39 @@
  * You'll probably want to add stuff here.
  */
 /*
-struct pagetable {
-	//Entry Low and high?
-	struct pagetable** page_table
-};*/
+struct page_frame {
+	paddr_t ppn;
+};
 
-/*
+
+struct pagetable {
+	struct page_frame *pf;
+};
+
 typedef struct pagetable** level2PageTable
-level2PageTable lvl2PT
+level2PageTable lvl2PT;
 int size_lvl2PT;
 struct lock* lvl2PT_lock;
 
 } page_table;
-struct frame_table {
-	int size;
-	int start;
-	paddr_t offet;
-};*/
+*/
+
+struct multi_level_pagetable {
+	paddr_t ppn;
+	int used;
+	//struct addrspace* as;
+};
+struct root_level {
+	struct multi_level_pagetable mlp[1024];
+};
+#include <addrspace.h>
+typedef struct as_page as_page;
+int mpt_create(vaddr_t vaddress);
+paddr_t findInMPT(vaddr_t);
+bool region_valid(struct as_page* sas_page, vaddr_t faultaddress);
+
+typedef struct root_level mpt_t;
+mpt_t mpt[1024];
 #include <machine/vm.h>
 
 /* Fault-type arguments to vm_fault() */

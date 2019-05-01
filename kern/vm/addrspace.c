@@ -78,24 +78,49 @@ int as_copy(struct addrspace *old, struct addrspace **ret) {
 	 */
 	if (old->start == NULL) {
 		//You are trying to copy a newly created address space
-		//So just return the newly created new one as they are the same
+		//So just return the newly created newas as they are the same
+		*ret = newas;
 		return 0;
 	}
 	struct as_page * curr = old->start;
-	struct as_page * newcurr = newas->start;
-	while (curr != NULL) {
-		newcurr = kmalloc(sizeof(struct as_page));
-		if (newcurr == NULL) {
+	struct as_page * newcurr = kmalloc(sizeof(struct as_page));
+	if (newcurr->next == NULL) {
+		return ENOMEM;
+	}
+	newcurr->vaddress = curr->vaddress;
+	newcurr->size = curr->size;
+	newcurr->mode = curr->mode;
+	newcurr->pre_load_mode = curr->pre_load_mode;
+	newcurr->next = NULL;
+	newas->start = newcurr;
+	
+	while (curr->next != NULL) {
+		newcurr->next = kmalloc(sizeof(struct as_page));
+		if (newcurr->next == NULL) {
 			return ENOMEM;
 		}
-		newcurr->vaddress = curr->vaddress;
-		newcurr->size = curr->size;
-		newcurr->mode = curr->mode;
-		newcurr->pre_load_mode = curr->pre_load_mode;
-		newcurr->next = NULL;
+		newcurr->next->vaddress = curr->next->vaddress;
+		newcurr->next->size = curr->next->size;
+		newcurr->next->mode = curr->next->mode;
+		newcurr->next->pre_load_mode = curr->next->pre_load_mode;
+		newcurr->next->next = NULL;
 		curr = curr->next;
 		newcurr = newcurr->next;
 	}
+	//DEBUG PRINTING
+	
+	curr = old->start;
+	newcurr = newas->start;
+	kprintf("Test of the copying\n!");
+	while (curr != NULL || newcurr != NULL) {
+		kprintf("Curr 0x%x == ", curr->vaddress);
+		kprintf("newcurr 0x%x \n", newcurr->vaddress);
+		curr = curr->next;
+		newcurr = newcurr->next;
+	}
+	kprintf("END\n\n!");
+
+
 	*ret = newas;
 	return 0;
 }
@@ -104,7 +129,11 @@ void as_destroy(struct addrspace *as) {
 	/*
 	 * Clean up as needed.
 	 */
-	if (as->start == NULL || as == NULL) {
+	if (as == NULL) {
+		return;
+	}
+	if (as->start == NULL) {
+		kfree(as);
 		return;
 	}
 	struct as_page* next_p = as->start->next;
@@ -114,6 +143,7 @@ void as_destroy(struct addrspace *as) {
 		next_p = next_p->next;
 	}
 	kfree(as->start);
+	kfree(as);
 
 }
 
@@ -130,16 +160,17 @@ void as_activate(void) {
 	}
 
 	//dumbvm is best vm
-	int spl = splhigh();
-	int i;
-	for (i = 0; i < NUM_TLB; i++) {
-		tlb_write(TLBHI_INVALID(i), TLBLO_INVALID(), i);
-	}
-
-	splx(spl);
+	as_deactivate();
 }
 
 void as_deactivate(void) {
+	int i, spl;
+
+	spl = splhigh();
+	for (i = 0; i < NUM_TLB; i++) {
+		tlb_write(TLBHI_INVALID(i), TLBLO_INVALID(), i);
+	}
+	splx(spl);
 	/*
 	 * Write this. For many designs it won't need to actually do
 	 * anything. See proc.c for an explanation of why it (might)
@@ -169,8 +200,11 @@ int as_define_region(struct addrspace *as, vaddr_t vaddr, size_t memsize,
 	memsize += vaddr & ~(vaddr_t)PAGE_FRAME;
 	vaddr &= PAGE_FRAME;
 
+
 	/* ...and now the length. */
 	memsize = (memsize + PAGE_SIZE - 1) & PAGE_FRAME;
+
+	//size_t npages = memsize / PAGE_SIZE;
 	mode_t per_mode = 0;
 	if (readable) {
 		per_mode |= PF_R;
@@ -181,19 +215,27 @@ int as_define_region(struct addrspace *as, vaddr_t vaddr, size_t memsize,
 	if (executable) {
 		per_mode |= PF_X;
 	}
-	struct as_page * curr = as->start;
+	struct as_page* curr = as->start;
+	struct as_page* oldcurr = as->start;
 	while (curr != NULL) {
+		oldcurr = curr;
 		curr = curr->next;
 	}
 	curr = kmalloc(sizeof(struct as_page));
 	if (curr == NULL) {
 		return ENOMEM;
-	}
+	} 
 	curr->vaddress = vaddr;
 	curr->size = memsize;
 	curr->mode = per_mode;
 	curr->next = NULL;
-	return 0; /* Unimplemented */
+	if (as->start == NULL) {
+		as->start = curr;
+	}
+	else {
+		oldcurr->next = curr;
+	}
+	return 0; 
 }
 
 int as_prepare_load(struct addrspace *as) {
@@ -203,7 +245,7 @@ int as_prepare_load(struct addrspace *as) {
 	struct as_page* curr = as->start;
 	while (curr != NULL) {
 		curr->pre_load_mode = curr->mode;
-		curr->mode = PF_W;
+		curr->mode |= PF_W;
 		curr = curr->next;
 	}
 	return 0;
@@ -222,19 +264,34 @@ int as_define_stack(struct addrspace *as, vaddr_t *stackptr) {
 	/*
 	 * Write this.
 	 */
-	struct as_page* newPage = as->start;
-	while (newPage != NULL) {
-		newPage = newPage->next;
+	
+	struct as_page* curr = as->start;
+	struct as_page* oldcurr = as->start;
+	while (curr != NULL) {
+		oldcurr = curr;
+		curr = curr->next;
 	}
-	newPage = kmalloc(sizeof(struct as_page));
-	if (newPage == NULL) {
+	curr = kmalloc(sizeof(struct as_page));
+	if (curr == NULL) {
 		return ENOMEM;
 	}
-	newPage->vaddress = USERSTACK * (STACKPAGES - PAGE_SIZE);
-	newPage->size = STACKPAGES;
-	newPage->mode = (PF_R | PF_W | PF_X);
-	newPage->next = NULL;
-
+	curr->vaddress = USERSTACK - STACKPAGES * PAGE_SIZE;
+	curr->size = STACKPAGES;
+	curr->mode = (PF_R | PF_W | PF_X);
+	curr->next = NULL;
+	if (as->start == NULL) {
+		as->start = curr;
+	}
+	else {
+		oldcurr->next = curr;
+	}
+	
+	/*
+	int ret = as_define_region(as, USERSTACK, STACKPAGES*PAGE_SIZE, PF_R, PF_W, PF_X);
+	if (ret) {
+		return ret;
+	}
+	*/
 	/* Initial user-level stack pointer */
 	*stackptr = USERSTACK;
 

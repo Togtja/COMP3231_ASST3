@@ -40,7 +40,6 @@
 #define STACKPAGES    16
 
 struct vnode;
-struct as_seg;
 typedef struct as_page as_page;
 struct as_page {
 	vaddr_t vaddress; //The Virtual adress for the node
