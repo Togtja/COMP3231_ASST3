@@ -38,6 +38,9 @@
 #include <vm.h>
 #include <proc.h>
 #include <elf.h>
+#include <synch.h> //For lock commands
+
+
 
 /*
  * Note! If OPT_DUMBVM is set, as is the case until you start the VM
@@ -61,7 +64,12 @@ struct addrspace * as_create(void) {
 	/*
 	 * Initialize as needed.
 	 */
+	//Lock to make sure that every body get's uni id's
+	lock_acquire(as_lock);
+	asid_generator++;
+	as->asid = asid_generator<<6;
 	as->start = NULL;
+	lock_release(as_lock);
 	return as;
 }
 
@@ -82,23 +90,33 @@ int as_copy(struct addrspace *old, struct addrspace **ret) {
 		*ret = newas;
 		return 0;
 	}
+	//lock_acquire(as_lock);
 	struct as_page * curr = old->start;
 	struct as_page * newcurr = kmalloc(sizeof(struct as_page));
-	if (newcurr->next == NULL) {
+	if (newcurr == NULL) {
+		as_destroy(newas);
 		return ENOMEM;
 	}
+	//kprintf("Going in to memcpy\n");
+	newcurr->vaddress = alloc_kpages(1);
+	memcpy((void *)newcurr->vaddress, (void *)curr->vaddress, PAGE_SIZE);
+	//mpt_create(newcurr->vaddress & PAGE_FRAME);
+	//kprintf("New adress: 0x%x   Old adress: 0x%x\n", newcurr->vaddress, curr->vaddress);
 	newcurr->vaddress = curr->vaddress;
 	newcurr->size = curr->size;
 	newcurr->mode = curr->mode;
 	newcurr->pre_load_mode = curr->pre_load_mode;
 	newcurr->next = NULL;
 	newas->start = newcurr;
-	
 	while (curr->next != NULL) {
 		newcurr->next = kmalloc(sizeof(struct as_page));
 		if (newcurr->next == NULL) {
+			as_destroy(newas);
 			return ENOMEM;
 		}
+		newcurr->next->vaddress = alloc_kpages(1);
+		memcpy((void *)newcurr->next->vaddress, (void *)curr->next->vaddress, PAGE_SIZE);
+		//mpt_create(newcurr->next->vaddress & PAGE_FRAME);
 		newcurr->next->vaddress = curr->next->vaddress;
 		newcurr->next->size = curr->next->size;
 		newcurr->next->mode = curr->next->mode;
@@ -107,21 +125,13 @@ int as_copy(struct addrspace *old, struct addrspace **ret) {
 		curr = curr->next;
 		newcurr = newcurr->next;
 	}
-	//DEBUG PRINTING
-	
-	curr = old->start;
-	newcurr = newas->start;
-	kprintf("Test of the copying\n!");
-	while (curr != NULL || newcurr != NULL) {
-		kprintf("Curr 0x%x == ", curr->vaddress);
-		kprintf("newcurr 0x%x \n", newcurr->vaddress);
-		curr = curr->next;
-		newcurr = newcurr->next;
-	}
-	kprintf("END\n\n!");
-
-
 	*ret = newas;
+	lock_acquire(as_lock);
+	
+
+
+	lock_release(as_lock);
+	
 	return 0;
 }
 
@@ -297,4 +307,22 @@ int as_define_stack(struct addrspace *as, vaddr_t *stackptr) {
 
 	return 0;
 }
+/*
+void mpt_copy(struct addrspace * old, struct addrspace * newas) {
+	int spl = splhigh();
+	uint32_t oldasid = (uint32_t)old;
+	for (int i = 0; i < 1024; i++) {
+		for (int j = 0; j < 1024; j++) {
+			if (mpt[i].mlp[j].asid == oldasid) {
+				mpt_create(newas, PADDR_TO_KVADDR(mpt[i].mlp[j].ppn));
+				vaddr_t nep = alloc_kpages(1);
+				paddr_t newp = findInMPT(newas, PADDR_TO_KVADDR(mpt[i].mlp[j].ppn));
+				memcpy((void *)nep, (void *)PADDR_TO_KVADDR(newp), PAGE_SIZE);
+				newp = nep;
 
+			}
+		}
+	}
+	splx(spl);
+}
+*/

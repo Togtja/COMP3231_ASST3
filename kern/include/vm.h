@@ -54,23 +54,25 @@ struct lock* lvl2PT_lock;
 */
 
 struct multi_level_pagetable {
+	uint32_t mpt_asid;
 	paddr_t ppn;
-	int used;
+	vaddr_t vpn;
 	//struct addrspace* as;
 };
 struct root_level {
-	struct multi_level_pagetable mlp[1024];
+	struct multi_level_pagetable* mlp[1024];
 };
 #include <addrspace.h>
 typedef struct as_page as_page;
-int mpt_create(vaddr_t vaddress);
-paddr_t findInMPT(vaddr_t);
+typedef struct addrspace* addrspace; //This is a bit bad but to lazy to fix
+int mpt_create(addrspace as,vaddr_t vaddress);
+paddr_t findInMPT(addrspace as,vaddr_t);
 bool region_valid(struct as_page* sas_page, vaddr_t faultaddress);
 
-typedef struct root_level mpt_t;
+typedef struct root_level* mpt_t;
 mpt_t mpt[1024];
 #include <machine/vm.h>
-
+struct lock* as_lock;
 /* Fault-type arguments to vm_fault() */
 #define VM_FAULT_READ        0    /* A read was attempted */
 #define VM_FAULT_WRITE       1    /* A write was attempted */

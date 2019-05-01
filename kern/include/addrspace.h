@@ -48,7 +48,7 @@ struct as_page {
 	mode_t pre_load_mode; //The mode before loading the address
 	as_page * next; //The next addresspage/region
 };
-
+uint32_t asid_generator;
 /*
  * Address space - data structure associated with the virtual memory
  * space of a process.
@@ -66,9 +66,12 @@ struct addrspace {
         paddr_t as_stackpbase;
 #else
         /* Put stuff here for your VM system */
+	uint32_t asid; //The asid used for paralelism
 	struct as_page* start; //Linked list for the address_node
 #endif
 };
+
+//void mpt_copy(struct addrspace * old, struct addrspace * newas);
 
 /*
  * Functions in addrspace.c:
@@ -125,7 +128,6 @@ int               as_define_region(struct addrspace *as,
 int               as_prepare_load(struct addrspace *as);
 int               as_complete_load(struct addrspace *as);
 int               as_define_stack(struct addrspace *as, vaddr_t *initstackptr);
-
 
 /*
  * Functions in loadelf.c
